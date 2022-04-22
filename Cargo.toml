@@ -1,0 +1,15 @@
+[package]
+name = "Sanity"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+regex = "1.5.5"
+rayon = "1.5"
+ssh-key =  {version = "0.4.0",features = ["ed25519"] }
+rand = "0.8.5"
+anyhow = "1.0.57"
+log = "0.4.16"
+clap = {version = "3.1.11", features = [ "derive" ]}
