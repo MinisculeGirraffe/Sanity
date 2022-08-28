@@ -1,17 +1,15 @@
 use anyhow::Error;
-use log::{info, log, trace, warn};
-use rayon::prelude::*;
 
 use regex::Regex;
 use ssh_key::{rand_core::OsRng, Algorithm, LineEnding, PrivateKey};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicUsize, Ordering, AtomicU64};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fmt, thread};
 
 use clap::Parser;
 
-const COUNTER_THRESHOLD: usize = 10000;
+const COUNTER_THRESHOLD: u64 = 10000;
 
 #[derive(Parser)]
 #[clap(name = "Sanity")]
@@ -27,21 +25,21 @@ struct Cli {
 
 #[derive(Debug)]
 struct Counter {
-    total: AtomicUsize,
-    success: AtomicUsize,
+    total: AtomicU64,
+    success: AtomicU64,
 }
 
 impl Counter {
     /// Create new instance
     fn new() -> Self {
         Self {
-            total: AtomicUsize::new(0),
-            success: AtomicUsize::new(0),
+            total: AtomicU64::new(0),
+            success: AtomicU64::new(0),
         }
     }
 
     /// Count towards total numbers of fingerprints generated
-    fn count_total(&self, accumulated_counts: usize) {
+    fn count_total(&self, accumulated_counts: u64) {
         self.total.fetch_add(accumulated_counts, Ordering::SeqCst);
     }
 
@@ -51,12 +49,12 @@ impl Counter {
     }
 
     /// Get number of total fingerprints generated
-    fn get_total(&self) -> usize {
+    fn get_total(&self) -> u64 {
         self.total.load(Ordering::SeqCst)
     }
 
     /// Get number of total fingerprints matched
-    fn get_success(&self) -> usize {
+    fn get_success(&self) -> u64 {
         self.success.load(Ordering::SeqCst)
     }
 }
@@ -78,9 +76,9 @@ fn setup_summary(counter: Arc<Counter>) {
         thread::sleep(Duration::from_millis(1000));
         let secs_elapsed = start.elapsed().as_secs();
         println!(
-            "Summary: {} (avg. {:.2} hash/s)",
+            "Summary: {} (avg. {:.2} keys/s)",
             &counter,
-            counter.get_total() as f64 / secs_elapsed as f64
+            counter.get_total()  / secs_elapsed 
         );
     }
 }
@@ -99,15 +97,16 @@ fn main() -> Result<(), Error> {
         let counter_cloned = Arc::clone(&counter);
         pool.spawn(move || {
             println!("Thread #{} Started", thread_id);
-            let mut report_counter: usize = 0;
+            let mut report_counter: u64 = 0;
             loop {
                 let unencrypted_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
-                let pubKey = unencrypted_key.public_key().to_openssh().unwrap();
-
-                if reg.is_match(&pubKey) {
+                let pub_key = unencrypted_key.public_key().to_openssh().unwrap();
+                if reg.is_match(&pub_key) {
                     let priv_text = unencrypted_key.to_openssh(LineEnding::default()).unwrap();
+
                     counter_cloned.count_success();
-                    println!("{}", pubKey);
+                    println!("Public: {}", pub_key);
+                    println!("Private: {}", priv_text.as_str());
                     println!("{}", counter_cloned)
                 }
                 report_counter += 1;
