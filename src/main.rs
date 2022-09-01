@@ -1,15 +1,17 @@
 use anyhow::Error;
-
 use regex::Regex;
+
+
 use ssh_key::{rand_core::OsRng, Algorithm, LineEnding, PrivateKey};
-use std::sync::atomic::{AtomicUsize, Ordering, AtomicU64};
+use std::path::Path;
+use std::sync::atomic::{AtomicU64,  Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::{fmt, thread};
 
 use clap::Parser;
 
-const COUNTER_THRESHOLD: u64 = 10000;
+const COUNTER_THRESHOLD: u64 = 100000;
 
 #[derive(Parser)]
 #[clap(name = "Sanity")]
@@ -78,7 +80,7 @@ fn setup_summary(counter: Arc<Counter>) {
         println!(
             "Summary: {} (avg. {:.2} keys/s)",
             &counter,
-            counter.get_total()  / secs_elapsed 
+            counter.get_total() / secs_elapsed
         );
     }
 }
@@ -87,26 +89,25 @@ fn main() -> Result<(), Error> {
     let cli = Cli::parse();
     println!("Started");
     let counter = Arc::new(Counter::new());
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads((cli.threads + 1).into())
-        .build()
-        .unwrap();
 
     for thread_id in 0..cli.threads {
         let reg = Regex::new(cli.name.as_str()).unwrap();
         let counter_cloned = Arc::clone(&counter);
-        pool.spawn(move || {
+        let join_handle = std::thread::spawn(move || {
             println!("Thread #{} Started", thread_id);
             let mut report_counter: u64 = 0;
             loop {
                 let unencrypted_key = PrivateKey::random(&mut OsRng, Algorithm::Ed25519).unwrap();
-                let pub_key = unencrypted_key.public_key().to_openssh().unwrap();
-                if reg.is_match(&pub_key) {
-                    let priv_text = unencrypted_key.to_openssh(LineEnding::default()).unwrap();
+                let pub_key = unencrypted_key.public_key();
+                let pub_text = &pub_key.to_openssh().unwrap();
+                if reg.is_match(&pub_text) {
+                    let path = Path::new("./").join(pub_text);
 
+                    _ = unencrypted_key.write_openssh_file(&path, LineEnding::LF);
+
+                    _ = pub_key.write_openssh_file(&path.with_extension("pub"));
                     counter_cloned.count_success();
-                    println!("Public: {}", pub_key);
-                    println!("Private: {}", priv_text.as_str());
+
                     println!("{}", counter_cloned)
                 }
                 report_counter += 1;
@@ -118,9 +119,7 @@ fn main() -> Result<(), Error> {
         });
     }
 
-    let counter_cloned = Arc::clone(&counter);
-
-    pool.install(move || setup_summary(counter_cloned));
+    setup_summary(counter);
 
     Ok(())
 }
